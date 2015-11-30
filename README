@@ -1,0 +1,4 @@
+30min code.  need to input your skim manually in MakeSmallBaby.cc.  Make sure to update the class files (StopCMS.h/cc).
+
+make and run executible:  CopyBaby 
+./CopyBaby [file] [name of new file]
