@@ -16,6 +16,43 @@
 
 // StopCMS3
 #include "StopCMS3.h"
+//====================//
+//                    //
+// Utility Structures //
+//                    //
+//====================//
+
+struct Lepton{
+        int id;
+        int idx;
+        LorentzVector p4;
+        //Lepton(id, idx, p4) {id = id; idx = idx; p4 = p4;}
+};
+
+struct sortbypt{
+  bool operator () (const pair<int, LorentzVector> &v1, const pair<int,LorentzVector> &v2){
+    return v1.second.pt() > v2.second.pt();
+  }
+};
+
+struct sortLepbypt{
+  bool operator () (const Lepton &lep1, const Lepton &lep2){
+    return lep1.p4.pt() > lep2.p4.pt();
+  }
+};
+
+struct sortP4byPt {
+  bool operator () (const LorentzVector &lv1, const LorentzVector &lv2) { return lv1.pt() > lv2.pt(); }
+};
+
+bool CompareIndexValueGreatest(const std::pair<double, int>& firstElem, const std::pair<double, int>& secondElem) {
+  return firstElem.first > secondElem.first;
+}
+bool CompareIndexValueSmallest(const std::pair<double, int>& firstElem, const std::pair<double, int>& secondElem) {
+  return firstElem.first < secondElem.first;
+}
+
+bool sortByCSV ( std::pair<int, double>& p1, std::pair<int, double>& p2) { return p1.second > p2.second; }
 
 using namespace std;
 using namespace stoptas;
@@ -38,7 +75,10 @@ void MakeSmallBaby::copytest(TFile *oldfile, char* output_name, int nEvents, cha
         stopcms3.Init(tree);
         stopcms3.LoadAllBranches();
 cout<<"interesting "<<output_name<<endl;
-   TFile *newfile = new TFile(Form("%s_skimmed.root", output_name),"recreate");
+   TFile *newfile = new TFile(Form("%s.root", output_name),"recreate");
+  /* TH1D* counterhist = (TH1D*) oldfile->Get("h_counter");
+   counterhist->Write();
+*/
    TTree *newtree = tree->CloneTree(0);
     //
     // Get File Content
@@ -50,14 +90,7 @@ cout<<"interesting "<<output_name<<endl;
       tree->LoadTree(event);
       //stopcms3.LoadAllBranches();
       stopcms3.GetEntry(event);
-     // if(pfmet() < 200) continue;
-      if(ngoodleps()!=1) continue;
-    //  if(mt_met_lep()<150) continue;
-      if(nvetoleps()!=1) continue;
-      if(!PassTrackVeto_v3()) continue;
-      if(!PassTauVeto()) continue;
-      if(pfmet() < 200.) continue;
-      if(mt_met_lep()<150.) continue;
+      if(!CRSRskim(false,true));
       stopcms3.LoadAllBranches();      
       newtree->Fill();
      }
@@ -66,4 +99,137 @@ cout<<"interesting "<<output_name<<endl;
    newtree->AutoSave();
    delete oldfile;
    delete newfile;
+
+}
+
+bool MakeSmallBaby::SinglelepSkim(){
+  if(pfmet() < 150) return false;
+  if(ngoodleps()!=1) return false;
+  if(nvetoleps()!=1) return false;
+  if(!PassTrackVeto()) return false;
+  return true;
+}
+
+bool MakeSmallBaby::DilepSkim(){
+  if(pfmet() < 150) return false;
+  if(ngoodbtags() <1) return false;
+  if(mt_met_lep()<150) return false;
+  return true;
+}
+
+bool MakeSmallBaby::CRSRskim(bool use_removed_lep_met, bool have_removed_lep_variables_in_baby) {
+  //
+  // check pre-selection
+  //
+  if (is_data() && !filt_met()) return false;
+  if (is_data() && !(HLT_MET() || HLT_SingleMu() || HLT_SingleEl())) return false;
+  if (nvtxs() < 1) return false;
+  if (ngoodleps() < 1) return false;
+  if (ngoodjets() < 2) return false;  
+  if (ngoodleps() > 1 || nvetoleps() > 1 || !PassTrackVeto() || !PassTauVeto())
+    if (ngoodbtags() < 1) return false;
+
+  if (!use_removed_lep_met) {
+    if (mindphi_met_j1_j2() < 0.8) return false;
+    if (pfmet() < 250.) return false;
+    if (mt_met_lep() < 150.) return false;
+    if (ngoodjets() == 2 && topnessMod() < 6.4) return false;
+    if (ngoodjets() == 3 && MT2W() < 200.) return false;
+  }
+  else {
+    if (have_removed_lep_variables_in_baby) {
+      if (mindphi_met_j1_j2_rl() < 0.8) return false;
+      if (pfmet_rl() < 250.) return false;
+      if (mt_met_lep_rl() < 150.) return false;
+      if (ngoodjets() == 2 && topnessMod_rl() < 6.4) return false;
+      if (ngoodjets() == 3 && MT2W_rl() < 200.) return false;
+    }
+    else {
+      //
+      // calculate new met variable with the 2nd lepton removed
+      float new_pfmet_x = pfmet() * std::cos(pfmet_phi());
+      float new_pfmet_y = pfmet() * std::sin(pfmet_phi());
+        
+      //
+      // remove the second lepton, iso track, or tau from the MET
+      //
+      if (nvetoleps() > 1) {
+        new_pfmet_x += lep2_p4().px();
+        new_pfmet_y += lep2_p4().py();
+      }
+      else if (!PassTrackVeto()) {
+        vecLorentzVector isotrk_p4s;
+        for (unsigned int idx = 0; idx < isoTracks_isVetoTrack_v3().size(); idx++) {
+          if (!isoTracks_isVetoTrack_v3().at(idx)) continue;
+          isotrk_p4s.push_back(isoTracks_p4().at(idx));
+        }
+        if (isotrk_p4s.size() > 0) {
+          std::sort(isotrk_p4s.begin(), isotrk_p4s.end(), sortP4byPt());
+          new_pfmet_x += isotrk_p4s.at(0).px();
+          new_pfmet_y += isotrk_p4s.at(0).py();
+        }
+      }
+      else if (!PassTauVeto()) {
+        vecLorentzVector tau_p4s;
+        for (unsigned int idx = 0; idx < tau_isVetoTau().size(); idx++) {
+          if (!tau_isVetoTau().at(idx)) continue;
+          tau_p4s.push_back(tau_p4().at(idx));
+        }
+        if (tau_p4s.size() > 0) {
+          std::sort(tau_p4s.begin(), tau_p4s.end(), sortP4byPt());
+          new_pfmet_x += tau_p4s.at(0).px();
+          new_pfmet_y += tau_p4s.at(0).py();
+        }
+      }
+
+      //
+      // calclate new met quantities
+      //
+    //  double pfmet_rl     = std::sqrt(new_pfmet_x*new_pfmet_x + new_pfmet_y*new_pfmet_y);
+    //  double pfmet_phi_rl = std::atan2(new_pfmet_y, new_pfmet_x);              
+      if (pfmet_rl() < 250.) return false;
+
+      if (nvetoleps() > 0) {
+       // double mt_met_lep_rl = calculateMt(lep1_p4(), pfmet_rl, pfmet_phi_rl);      
+        if (mt_met_lep_rl() < 150.) return false;
+      }
+
+     // double mindphi_met_j1_j2_rl = getMinDphi(pfmet_phi_rl,jets.ak4pfjets_p4.at(0),jets.ak4pfjets_p4.at(1));
+      if (mindphi_met_j1_j2_rl() < 0.8) return false;
+
+      if (nvetoleps() > 0) {
+        //
+        // first, we need to sort jets by CSV value
+        //
+        std::vector<std::pair<int, double> > v_idx_csv;
+        for (unsigned int idx = 0; idx < ak4pfjets_p4().size(); idx++) {
+          v_idx_csv.push_back(std::make_pair(idx, ak4pfjets_CSV().at(idx)));
+        }
+        std::sort(v_idx_csv.begin(), v_idx_csv.end(), sortByCSV);
+        
+        //
+        // now get vector<LV> of b-jets and add-jets
+        //
+        std::vector<LorentzVector> mybjets;
+        std::vector<LorentzVector> addjets;        
+        for (auto p : v_idx_csv) {
+          if (ak4pfjets_passMEDbtag().at(p.first))
+            mybjets.push_back(ak4pfjets_p4().at(p.first));
+          else if (mybjets.size() <=1 && (mybjets.size() + addjets.size()) < 3)
+            addjets.push_back(ak4pfjets_p4().at(p.first));                       
+        }
+        
+        if (ngoodjets() == 3) {
+         // double MT2W_rl = CalcMT2W_(mybjets,myaddjets,lep1_p4(),pfmet_rl, pfmet_phi_rl);
+          if (MT2W_rl() < 200.) return false;
+        }
+        if (ngoodjets() == 2) {
+         // double topnessMod_rl = CalcTopness_(1,pfmet_rl,pfmet_phi_rl,lep1_p4(),mybjets,myaddjets);
+          if (topnessMod_rl() < 6.4) return false;        
+        }      
+      }
+    }
+  }
+
+  return true;
 }

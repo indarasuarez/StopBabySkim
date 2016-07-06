@@ -28,7 +28,10 @@ class MakeSmallBaby {
 
    TTree          *fChain;   //!pofloater to the analyzed TTree or TChain
    Int_t           fCurrent; //!current Tree number in a TChain
-  void copytest(TFile *oldfile, char* output_name, int nEvents, char* path); 
+   void copytest(TFile *oldfile, char* output_name, int nEvents, char* path); 
+   bool CRSRskim (bool use_removed_lep_met, bool have_removed_lep_variables_in_baby);
+   bool SinglelepSkim();
+   bool DilepSkim();
    private :
 
 };
